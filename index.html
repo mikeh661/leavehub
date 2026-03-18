@@ -1772,46 +1772,63 @@ function renderStaffPicker() { /* no-op — no longer used */ }
 function selectStaff(id) { /* no-op */ }
 function backToNamePick() { /* no-op */ }
 
-function checkPin() {
+async function checkPin() {
   const emailInput = document.getElementById('pw-email');
   const pinInput   = document.getElementById('pw-input');
   const err        = document.getElementById('pw-error');
+  const btn        = document.querySelector('.pw-btn');
   const email      = emailInput.value.trim().toLowerCase();
   const pin        = pinInput.value;
 
   if(!email) { err.textContent = 'Please enter your email address'; emailInput.focus(); return; }
   if(!pin)   { err.textContent = 'Please enter your PIN'; pinInput.focus(); return; }
 
-  // Migrate any staff missing role/pin
-  STAFF.forEach(s => { if(!s.role) s.role='employee'; if(!s.pin) s.pin='1234'; });
-
-  const s = STAFF.find(st => st.email.toLowerCase() === email);
-
-  if(!s) {
-    err.textContent = 'Email address not found — check with your manager';
-    emailInput.classList.add('shake');
-    setTimeout(() => emailInput.classList.remove('shake'), 400);
-    emailInput.focus();
-    return;
-  }
-
-  if(pin !== (s.pin || '1234')) {
-    err.textContent = 'Incorrect PIN — try again';
-    pinInput.value = '';
-    pinInput.classList.add('shake');
-    setTimeout(() => pinInput.classList.remove('shake'), 400);
-    pinInput.focus();
-    return;
-  }
-
-  // Success
-  loggedInUserId = s.id;
-  currentUserId  = s.id;
-  sessionStorage.setItem('lh_auth', String(s.id));
-  document.getElementById('pw-screen').style.display = 'none';
-  document.getElementById('app-shell').style.display = 'flex';
+  // Show loading state
+  if(btn){ btn.disabled=true; btn.textContent='Signing in…'; }
   err.textContent = '';
-  bootApp();
+
+  try {
+    // Query Supabase directly — guarantees fresh data regardless of load timing
+    const { data, error } = await sb.from('staff').select('*').ilike('email', email).single();
+
+    if(error || !data) {
+      err.textContent = 'Email address not found — check with your manager';
+      emailInput.classList.add('shake');
+      setTimeout(() => emailInput.classList.remove('shake'), 400);
+      emailInput.focus();
+      if(btn){ btn.disabled=false; btn.textContent='Sign in'; }
+      return;
+    }
+
+    const s = rowToStaff(data);
+
+    if(pin !== (s.pin || '1234')) {
+      err.textContent = 'Incorrect PIN — try again';
+      pinInput.value = '';
+      pinInput.classList.add('shake');
+      setTimeout(() => pinInput.classList.remove('shake'), 400);
+      pinInput.focus();
+      if(btn){ btn.disabled=false; btn.textContent='Sign in'; }
+      return;
+    }
+
+    // Success — ensure this staff member is in our local array
+    if(!STAFF.find(st => st.id === s.id)) STAFF.push(s);
+
+    loggedInUserId = s.id;
+    currentUserId  = s.id;
+    sessionStorage.setItem('lh_auth', String(s.id));
+    document.getElementById('pw-screen').style.display = 'none';
+    document.getElementById('app-shell').style.display = 'flex';
+    err.textContent = '';
+    // Make sure all data is loaded before booting
+    if(STAFF.length <= 1) await loadAllData();
+    bootApp();
+
+  } catch(e) {
+    err.textContent = 'Connection error — please try again';
+    if(btn){ btn.disabled=false; btn.textContent='Sign in'; }
+  }
 }
 
 function checkPassword() { checkPin(); }
