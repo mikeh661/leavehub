@@ -13,6 +13,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
 :root {
   --bg: #f0f2f5;
@@ -373,13 +374,17 @@ textarea.form-control{resize:vertical;min-height:72px}
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <span>Settings</span>
       </button>
+      <button class="nav-item admin-only" onclick="showTab('reports')" id="nav-reports">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12V8M6 12V5M10 12V7M14 12V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>Reports</span>
+      </button>
       <button class="nav-item" onclick="signOut()" style="margin-top:auto" id="nav-signout">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Sign out</span>
       </button>
     </nav>
     <div class="sidebar-footer">
-      Castle Estates · Staff Leave<br>v2.6
+      Castle Estates · Staff Leave<br>v2.7
     </div>
   </aside>
 
@@ -391,6 +396,7 @@ textarea.form-control{resize:vertical;min-height:72px}
     <div id="tab-calendar" style="display:none"></div>
     <div id="tab-admin" style="display:none"></div>
     <div id="tab-settings" style="display:none"></div>
+    <div id="tab-reports" style="display:none"></div>
   </main>
 </div>
 
@@ -532,8 +538,7 @@ function canSee(tab) {
 }
 
 function enforceRoleOnTabs() {
-  // Hide admin/settings tab panels entirely for non-admins
-  ['admin','settings'].forEach(t => {
+  ['admin','settings','reports'].forEach(t => {
     const el = document.getElementById('tab-'+t);
     if(el) el.style.display = 'none';
   });
@@ -716,7 +721,7 @@ function showTab(tab) {
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
   const nb = document.getElementById('nav-'+tab);
   if(nb) nb.classList.add('active');
-  ['dashboard','book','myrequests','calendar','admin','settings'].forEach(t=>{
+  ['dashboard','book','myrequests','calendar','admin','settings','reports'].forEach(t=>{
     document.getElementById('tab-'+t).style.display = t===tab?'block':'none';
   });
   currentTab = tab;
@@ -730,21 +735,22 @@ function renderTab(tab) {
   else if(tab==='calendar') renderCalendar();
   else if(tab==='admin') renderAdmin();
   else if(tab==='settings') renderSettings();
+  else if(tab==='reports') renderReports();
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
+
+let dashCalMonth = new Date().getMonth();
+let dashCalYear  = new Date().getFullYear();
 
 function renderDashboard() {
   const s = getS(currentUserId);
   const used = usedD(currentUserId), rem = remD(currentUserId);
   const today = new Date(); today.setHours(0,0,0,0);
   const todayStr = today.toISOString().split('T')[0];
-  const wkEnd = new Date(today); wkEnd.setDate(today.getDate()+7);
   const myPend = requests.filter(r=>r.staffId===currentUserId&&r.status==='pending').length;
   const upcoming = requests.filter(r=>r.staffId===currentUserId&&r.status==='approved'&&new Date(r.start+'T12:00:00')>=today).sort((a,b)=>a.start.localeCompare(b.start)).slice(0,4);
   const upBH = Object.entries(UK_BH).filter(([d])=>new Date(d+'T12:00:00')>=today).sort((a,b)=>a[0].localeCompare(b[0])).slice(0,4);
-
-  // Who's off today
   const offToday = requests.filter(r=>r.status==='approved'&&r.start<=todayStr&&r.end>=todayStr);
   const offTodayIds = new Set(offToday.map(r=>r.staffId));
   const inToday = STAFF.filter(st=>!offTodayIds.has(st.id));
@@ -758,8 +764,6 @@ function renderDashboard() {
       <div class="stat-card"><div class="stat-num amber">${used}</div><div class="stat-label">Days taken</div></div>
       <div class="stat-card"><div class="stat-num ${myPend>0?'amber':'green'}">${myPend}</div><div class="stat-label">Awaiting approval</div></div>
     </div>
-
-    <!-- Who's in today -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div class="card-title" style="margin-bottom:0">Today — ${today.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</div>
@@ -769,27 +773,24 @@ function renderDashboard() {
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        ${inToday.map(st=>`
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--green-bg);border-radius:var(--radius)">
-          <div class="avatar" style="width:28px;height:28px;font-size:10px;background:${st.bg};color:${st.color};flex-shrink:0">${st.initials}</div>
-          <div>
-            <div style="font-size:12px;font-weight:500;color:var(--green-text)">${st.name}</div>
-            <div style="font-size:10px;color:var(--green-text);opacity:0.7">${st.dept}</div>
-          </div>
-          <div style="margin-left:auto;font-size:10px;font-weight:600;color:var(--green-text)">IN</div>
-        </div>`).join('')}
-        ${offToday.map(r=>{const st=getS(r.staffId);return`
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--amber-bg);border-radius:var(--radius)">
-          <div class="avatar" style="width:28px;height:28px;font-size:10px;background:${st.bg};color:${st.color};flex-shrink:0">${st.initials}</div>
-          <div>
-            <div style="font-size:12px;font-weight:500;color:var(--amber-text)">${st.name}</div>
-            <div style="font-size:10px;color:var(--amber-text);opacity:0.8">${r.type}</div>
-          </div>
-          <div style="margin-left:auto;font-size:10px;font-weight:600;color:var(--amber-text)">OFF</div>
-        </div>`;}).join('')}
+        ${inToday.map(st=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--green-bg);border-radius:var(--radius)"><div class="avatar" style="width:28px;height:28px;font-size:10px;background:${st.bg};color:${st.color};flex-shrink:0">${st.initials}</div><div><div style="font-size:12px;font-weight:500;color:var(--green-text)">${st.name}</div><div style="font-size:10px;color:var(--green-text);opacity:0.7">${st.dept}</div></div><div style="margin-left:auto;font-size:10px;font-weight:600;color:var(--green-text)">IN</div></div>`).join('')}
+        ${offToday.map(r=>{const st=getS(r.staffId);return`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--amber-bg);border-radius:var(--radius)"><div class="avatar" style="width:28px;height:28px;font-size:10px;background:${st.bg};color:${st.color};flex-shrink:0">${st.initials}</div><div><div style="font-size:12px;font-weight:500;color:var(--amber-text)">${st.name}</div><div style="font-size:10px;color:var(--amber-text);opacity:0.8">${r.type}</div></div><div style="margin-left:auto;font-size:10px;font-weight:600;color:var(--amber-text)">OFF</div></div>`;}).join('')}
       </div>
     </div>
-
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:0">Team calendar — ${MONTHS[dashCalMonth]} ${dashCalYear}</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn sm" onclick="dashCalChg(-1)">← Prev</button>
+          <button class="btn sm" onclick="dashCalChg(0)">Today</button>
+          <button class="btn sm" onclick="dashCalChg(1)">Next →</button>
+        </div>
+      </div>
+      ${buildTeamCal(dashCalYear, dashCalMonth)}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+        ${STAFF.map(st=>`<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)"><div style="width:10px;height:10px;border-radius:50%;background:${st.color}"></div>${st.name.split(' ')[0]}</div>`).join('')}
+      </div>
+    </div>
     <div class="card">
       <div class="card-title">Leave balance</div>
       <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:5px"><span>${used} days used</span><span>${rem} days remaining</span></div>
@@ -798,14 +799,7 @@ function renderDashboard() {
     <div class="two-col">
       <div class="card">
         <div class="card-title">Upcoming leave</div>
-        ${upcoming.length===0?`<p style="font-size:13px;color:var(--text3)">No upcoming leave booked</p>`:upcoming.map(r=>`
-        <div class="row">
-          <div><div class="row-name">${r.type}</div><div class="row-sub">${fmtFull(r.start)}${r.start!==r.end?' – '+fmtFull(r.end):''}</div></div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-size:12px;color:var(--text3)">${r.days}d</span>
-            <button class="btn sm" style="font-size:11px;padding:3px 8px" onclick="exportIcal(${r.id})" title="Add to calendar">📅</button>
-          </div>
-        </div>`).join('')}
+        ${upcoming.length===0?`<p style="font-size:13px;color:var(--text3)">No upcoming leave booked</p>`:upcoming.map(r=>`<div class="row"><div><div class="row-name">${r.type}</div><div class="row-sub">${fmtFull(r.start)}${r.start!==r.end?' – '+fmtFull(r.end):''}</div></div><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text3)">${r.days}d</span><button class="btn sm" style="font-size:11px;padding:3px 8px" onclick="exportIcal(${r.id})" title="Add to calendar">📅</button></div></div>`).join('')}
       </div>
       <div class="card">
         <div class="card-title">Upcoming bank holidays</div>
@@ -814,6 +808,44 @@ function renderDashboard() {
     </div>
   </div>`;
 }
+
+function dashCalChg(dir) {
+  if(dir===0){dashCalMonth=new Date().getMonth();dashCalYear=new Date().getFullYear();}
+  else{dashCalMonth+=dir;if(dashCalMonth<0){dashCalMonth=11;dashCalYear--;}if(dashCalMonth>11){dashCalMonth=0;dashCalYear++;}}
+  renderDashboard();
+}
+
+function buildTeamCal(y, m) {
+  const first=new Date(y,m,1),last=new Date(y,m+1,0);
+  let dow=first.getDay();dow=(dow+6)%7;
+  const today=new Date();today.setHours(0,0,0,0);
+  const mStr=`${y}-${String(m+1).padStart(2,'0')}`;
+  const offMap={};
+  requests.filter(r=>r.status==='approved').forEach(r=>{
+    const st=getS(r.staffId);if(!st)return;
+    let cur=new Date(r.start+'T12:00:00'),end2=new Date(r.end+'T12:00:00');
+    while(cur<=end2){
+      const dStr=cur.toISOString().split('T')[0];
+      if(dStr.startsWith(mStr)){if(!offMap[dStr])offMap[dStr]=[];offMap[dStr].push(st);}
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">`;
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d=>{html+=`<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text3);padding:4px 0">${d}</div>`;});
+  for(let i=0;i<dow;i++)html+=`<div></div>`;
+  for(let d=1;d<=last.getDate();d++){
+    const dS=`${mStr}-${String(d).padStart(2,'0')}`;
+    const dw=(dow+d-1)%7,isWE=dw>=5;
+    const isTd=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d;
+    const bh=getBH(dS),bo=getBO(dS);
+    const offStaff=offMap[dS]||[];
+    let bg=isWE?'var(--surface)':(bh?'var(--blue-bg)':(bo?'var(--red-bg)':'var(--surface2)')); 
+    html+=`<div style="background:${bg};border:2px solid ${isTd?'var(--navy)':'transparent'};border-radius:6px;padding:3px 4px;min-height:48px"><div style="font-size:11px;font-weight:${isTd?'700':'500'};color:${isTd?'var(--navy)':'var(--text2)'}${isWE?';opacity:0.5':''}">${d}</div><div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:2px">${offStaff.map(st=>`<div title="${st.name}" style="width:12px;height:12px;border-radius:50%;background:${st.color}"></div>`).join('')}</div></div>`;
+  }
+  html+=`</div>`;
+  return html;
+}
+
 
 function hour(){const h=new Date().getHours();return h<12?'morning':h<17?'afternoon':'evening';}
 
@@ -863,6 +895,10 @@ function renderBook() {
           <label class="form-label">Working days</label>
           <div class="form-control" id="days-preview" style="background:var(--surface2);color:var(--text3)">Select dates first</div>
         </div>
+        <div class="form-group" id="remaining-preview-group" style="display:none">
+          <label class="form-label">Days remaining after</label>
+          <div class="form-control" id="remaining-preview" style="background:var(--surface2);color:var(--text3)">—</div>
+        </div>
         <div class="form-group full">
           <label class="form-label">Reason <span style="color:var(--text3);font-weight:400">(optional)</span></label>
           <textarea class="form-control" id="leave-reason" placeholder="e.g. family holiday, medical appointment..."></textarea>
@@ -899,6 +935,8 @@ function updatePreview(){
   const s=document.getElementById('start-date').value;
   const e=isHalf ? s : document.getElementById('end-date').value;
   const el=document.getElementById('days-preview');
+  const remEl=document.getElementById('remaining-preview');
+  const remGrp=document.getElementById('remaining-preview-group');
   const bha=document.getElementById('bh-alert'), boa=document.getElementById('bo-alert');
   if(s&&e&&e>=s){
     const d=isHalf ? 0.5 : bizDays(s,e);
@@ -906,10 +944,21 @@ function updatePreview(){
     const halfLabel=isHalf?` (${document.getElementById('half-type')?.value||'AM'})`:'';
     el.textContent=isHalf?`½ day${halfLabel}`:`${d} working day${d!==1?'s':''}`;
     el.style.color=d>remD(currentUserId)?'var(--red)':'var(--text)';
+    // Live remaining days
+    const lt = leaveTypes.find(lt=>lt.name===document.getElementById('leave-type')?.value);
+    const countsAgainst = lt ? lt.countsAgainst : true;
+    if(countsAgainst && remEl && remGrp) {
+      const afterRem = remD(currentUserId) - d;
+      remGrp.style.display='';
+      remEl.textContent = afterRem >= 0 ? `${afterRem} day${afterRem!==1?'s':''} remaining` : `${Math.abs(afterRem)} day${Math.abs(afterRem)!==1?'s':''} over allowance`;
+      remEl.style.color = afterRem < 0 ? 'var(--red)' : afterRem < 3 ? 'var(--amber)' : 'var(--text)';
+      remEl.style.background = afterRem < 0 ? 'var(--red-bg)' : afterRem < 3 ? 'var(--amber-bg)' : 'var(--surface2)';
+    } else if(remGrp) { remGrp.style.display='none'; }
     bha.innerHTML=bhs.length?`<div class="alert warn" style="margin-bottom:12px">Your dates include ${bhs.length} bank holiday${bhs.length>1?'s':''} (${bhs.join(', ')}) — not counted as leave days.</div>`:'';
     boa.innerHTML=bos.length?`<div class="alert error" style="margin-bottom:12px">These dates overlap a restricted period: <strong>${bos.join(', ')}</strong>. Please choose different dates.</div>`:'';
   } else {
     el.textContent='Select dates first'; el.style.color='var(--text3)';
+    if(remGrp) remGrp.style.display='none';
     bha.innerHTML=''; boa.innerHTML='';
   }
 }
@@ -2110,6 +2159,99 @@ function togglePwVis() {
 
 function loadPw()  { return ''; }
 function savePw(p) { }
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+let reportCharts = {};
+
+function renderReports() {
+  Object.values(reportCharts).forEach(c=>{ try{c.destroy();}catch(e){} });
+  reportCharts = {};
+  const approved = requests.filter(r=>r.status==='approved'||r.status==='cancelled');
+  const year = new Date().getFullYear();
+  const thisYear = approved.filter(r=>r.start&&r.start.startsWith(year));
+  const byMonth = Array(12).fill(0);
+  thisYear.forEach(r=>{ const m=parseInt(r.start.split('-')[1])-1; byMonth[m]+=r.days; });
+  const byType = {};
+  thisYear.forEach(r=>{ byType[r.type]=(byType[r.type]||0)+r.days; });
+  const byStaff = {};
+  thisYear.forEach(r=>{ const nm=getS(r.staffId)?.name||'Unknown'; byStaff[nm]=(byStaff[nm]||0)+r.days; });
+  const sickByStaff = {};
+  thisYear.filter(r=>r.type&&r.type.toLowerCase().includes('sick')).forEach(r=>{
+    const nm=getS(r.staffId)?.name||'Unknown'; sickByStaff[nm]=(sickByStaff[nm]||0)+r.days;
+  });
+  const palette = ['#1B2D4F','#185FA5','#854F0B','#993556','#533AB7','#3B6D11','#A32D2D','#0C447C'];
+  const totalSick = thisYear.filter(r=>r.type&&r.type.toLowerCase().includes('sick')).reduce((a,r)=>a+r.days,0);
+
+  document.getElementById('tab-reports').innerHTML = `
+  <div class="page-header"><div><div class="page-title">Reports</div><div class="page-sub">Leave analytics for ${year}</div></div></div>
+  <div class="page-content">
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-num blue">${thisYear.reduce((a,r)=>a+r.days,0)}</div><div class="stat-label">Total days taken</div></div>
+      <div class="stat-card"><div class="stat-num green">${thisYear.length}</div><div class="stat-label">Requests this year</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--red)">${totalSick}</div><div class="stat-label">Sick days</div></div>
+      <div class="stat-card"><div class="stat-num amber">${requests.filter(r=>r.status==='pending').length}</div><div class="stat-label">Pending approval</div></div>
+    </div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">Leave days by month</div><canvas id="chart-monthly" height="200"></canvas></div>
+      <div class="card"><div class="card-title">Leave by type</div>
+        ${Object.keys(byType).length===0?`<p style="font-size:13px;color:var(--text3);text-align:center;padding:40px 0">No data yet</p>`:`<canvas id="chart-types" height="200"></canvas>`}
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">Days per employee</div>
+        ${Object.keys(byStaff).length===0?`<p style="font-size:13px;color:var(--text3);text-align:center;padding:40px 0">No data yet</p>`:`<canvas id="chart-staff" height="200"></canvas>`}
+      </div>
+      <div class="card"><div class="card-title">Sick leave per employee</div>
+        ${Object.keys(sickByStaff).length===0?`<p style="font-size:13px;color:var(--text3);text-align:center;padding:40px 0">No sick leave recorded for ${year}</p>`:`<canvas id="chart-sick" height="200"></canvas>`}
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Peak absence days</div>
+        ${buildPeakTable(thisYear)}
+      </div>
+      <div class="card">
+        <div class="card-title">Leave type breakdown</div>
+        ${Object.keys(byType).length===0?`<p style="font-size:13px;color:var(--text3)">No data yet</p>`:
+          Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type,days])=>{
+            const maxD=Math.max(...Object.values(byType));
+            return`<div class="row"><div class="row-name" style="font-size:13px;flex:1">${type}</div><div style="display:flex;align-items:center;gap:8px;min-width:140px"><div style="flex:1;height:6px;background:var(--surface2);border-radius:20px;overflow:hidden"><div style="width:${Math.round(days/maxD*100)}%;height:100%;background:var(--navy);border-radius:20px"></div></div><span style="font-size:13px;font-weight:600;min-width:28px;text-align:right">${days}d</span></div></div>`;
+          }).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  setTimeout(()=>{
+    const ctx1=document.getElementById('chart-monthly');
+    if(ctx1) reportCharts.monthly=new Chart(ctx1,{type:'bar',data:{labels:MONTHS.map(m=>m.slice(0,3)),datasets:[{label:'Days',data:byMonth,backgroundColor:'#1B2D4F',borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+    const ctx2=document.getElementById('chart-types');
+    const tk=Object.keys(byType);
+    if(ctx2&&tk.length) reportCharts.types=new Chart(ctx2,{type:'doughnut',data:{labels:tk,datasets:[{data:tk.map(k=>byType[k]),backgroundColor:palette.slice(0,tk.length)}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{size:11},boxWidth:12}}}}});
+    const ctx3=document.getElementById('chart-staff');
+    const sk=Object.keys(byStaff);
+    if(ctx3&&sk.length) reportCharts.staff=new Chart(ctx3,{type:'bar',data:{labels:sk.map(n=>n.split(' ')[0]),datasets:[{label:'Days',data:sk.map(k=>byStaff[k]),backgroundColor:sk.map(n=>{const st=STAFF.find(s=>s.name===n);return st?st.color:'#1B2D4F';}),borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+    const ctx4=document.getElementById('chart-sick');
+    const sck=Object.keys(sickByStaff);
+    if(ctx4&&sck.length) reportCharts.sick=new Chart(ctx4,{type:'bar',data:{labels:sck.map(n=>n.split(' ')[0]),datasets:[{label:'Days',data:sck.map(k=>sickByStaff[k]),backgroundColor:'#A32D2D',borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1}}}}});
+  },50);
+}
+
+function buildPeakTable(yearReqs) {
+  const dayCounts={};
+  yearReqs.forEach(r=>{
+    let cur=new Date(r.start+'T12:00:00'),end=new Date(r.end+'T12:00:00');
+    while(cur<=end){
+      const dStr=cur.toISOString().split('T')[0],dw=cur.getDay();
+      if(dw!==0&&dw!==6&&!isBH(dStr)) dayCounts[dStr]=(dayCounts[dStr]||0)+r.days;
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+  const top=Object.entries(dayCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(!top.length) return `<p style="font-size:13px;color:var(--text3)">No data yet</p>`;
+  const max=top[0][1];
+  return top.map(([d,n])=>`<div class="row"><div class="row-name">${fmtFull(d)}</div><div style="display:flex;align-items:center;gap:8px;flex:1;max-width:200px;margin-left:16px"><div style="flex:1;height:6px;background:var(--surface2);border-radius:20px;overflow:hidden"><div style="width:${Math.round(n/max*100)}%;height:100%;background:var(--navy);border-radius:20px"></div></div><span style="font-size:13px;font-weight:600;min-width:40px">${n} day${n!==1?'s':''}</span></div></div>`).join('');
+}
 
 function showLoginScreen(){
   document.getElementById('pw-screen').style.display='flex';
