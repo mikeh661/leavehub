@@ -428,7 +428,13 @@ async function connectSupabase() {
   }
 }
 
-function rowToStaff(r){ return {id:r.id,name:r.name,initials:r.initials||'',dept:r.dept||'',total:r.total||25,color:r.color||'#185FA5',bg:r.bg||'#E6F1FB',email:r.email,role:r.role||'employee',pin:r.pin||'1234',working_days:r.working_days||['Mon','Tue','Wed','Thu','Fri','Sat'],start_time:r.start_time||'09:30',end_time:r.end_time||'17:30',sat_start:r.sat_start||'09:00',sat_end:r.sat_end||'12:30'}; }
+function rowToStaff(r){
+  const defHours = {Mon:{start:'09:30',end:'17:30'},Tue:{start:'09:30',end:'17:30'},Wed:{start:'09:30',end:'17:30'},Thu:{start:'09:30',end:'17:30'},Fri:{start:'09:30',end:'17:30'},Sat:{start:'09:00',end:'12:30'}};
+  let day_hours = defHours;
+  try { if(r.day_hours) day_hours = typeof r.day_hours==='string' ? JSON.parse(r.day_hours) : r.day_hours; } catch(e){}
+  const working_days = Object.keys(day_hours);
+  return {id:r.id,name:r.name,initials:r.initials||'',dept:r.dept||'',total:r.total||25,color:r.color||'#185FA5',bg:r.bg||'#E6F1FB',email:r.email,role:r.role||'employee',pin:r.pin||'1234',day_hours,working_days};
+}
 function rowToReq(r){ return {id:r.id,staffId:r.staff_id,start:r.start_date,end:r.end_date,days:r.days,type:r.type,reason:r.reason||'',status:r.status,submitted:r.submitted}; }
 function rowToBO(r){ return {id:r.id,start:r.start_date,end:r.end_date,label:r.label}; }
 
@@ -1241,7 +1247,7 @@ function renderStaffPanel() {
               ${isLoggedInUser?`<span style="font-size:11px;background:var(--green-bg);color:var(--green-text);padding:1px 7px;border-radius:20px">You</span>`:''}
             </div>
             <div class="row-sub">${s.email} · ${s.total} days · PIN: ${'•'.repeat((s.pin||'1234').length)}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">${(s.working_days||['Mon','Tue','Wed','Thu','Fri','Sat']).filter(d=>d!=='Sat').join(', ')}: ${s.start_time||'09:30'}–${s.end_time||'17:30'}${(s.working_days||[]).includes('Sat')?` · Sat: ${s.sat_start||'09:00'}–${s.sat_end||'12:30'}`:''}${!(s.working_days||[]).includes('Sat')&&!(s.working_days||['Mon','Tue','Wed','Thu','Fri','Sat']).includes('Sat')?' · No Saturday':''}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${Object.entries(s.day_hours||{}).map(([d,h])=>`${d} ${h.start}–${h.end}`).join(' · ')}</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
@@ -1299,32 +1305,31 @@ function renderStaffPanel() {
         <input type="hidden" id="new-color-idx" value="0">
       </div>
       <div class="form-group full">
-        <label class="form-label">Working days</label>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
-          ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day=>`
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;font-weight:400;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--surface2)" id="day-label-${day}">
-            <input type="checkbox" id="day-${day}" value="${day}" onchange="updateWorkingDaysPreview()" style="width:auto;accent-color:var(--navy)"> ${day}
-          </label>`).join('')}
+        <label class="form-label">Working schedule</label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px" id="day-schedule">
+          ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day => {
+            const isWeekday = !['Sat','Sun'].includes(day);
+            const defStart = day==='Sat'?'09:00':day==='Sun'?'09:00':'09:30';
+            const defEnd   = day==='Sat'?'12:30':day==='Sun'?'17:30':'17:30';
+            const checked  = day!=='Sun';
+            return `
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--surface2)" id="day-row-${day}">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;min-width:52px">
+                <input type="checkbox" id="day-${day}" value="${day}" ${checked?'checked':''} onchange="toggleDayRow('${day}')" style="width:auto;accent-color:var(--navy)">
+                <span style="font-size:13px;font-weight:500">${day}</span>
+              </label>
+              <div id="day-times-${day}" style="display:flex;align-items:center;gap:8px;flex:1${!checked?';opacity:0.35;pointer-events:none':''}">
+                <input type="time" id="day-start-${day}" value="${defStart}" onchange="updateWorkingDaysPreview()"
+                  style="padding:4px 8px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;font-family:inherit;background:var(--surface);color:var(--text);outline:none">
+                <span style="font-size:12px;color:var(--text3)">to</span>
+                <input type="time" id="day-end-${day}" value="${defEnd}" onchange="updateWorkingDaysPreview()"
+                  style="padding:4px 8px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;font-family:inherit;background:var(--surface);color:var(--text);outline:none">
+                <span id="day-hrs-${day}" style="font-size:11px;color:var(--text3);min-width:32px"></span>
+              </div>
+            </div>`;
+          }).join('')}
         </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Weekday start</label>
-        <input class="form-control" type="time" id="new-start-time" value="09:30" onchange="updateWorkingDaysPreview()">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Weekday end</label>
-        <input class="form-control" type="time" id="new-end-time" value="17:30" onchange="updateWorkingDaysPreview()">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Saturday start <span style="font-weight:400;color:var(--text3)">(if works Sat)</span></label>
-        <input class="form-control" type="time" id="new-sat-start" value="09:00" onchange="updateWorkingDaysPreview()">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Saturday end <span style="font-weight:400;color:var(--text3)">(if works Sat)</span></label>
-        <input class="form-control" type="time" id="new-sat-end" value="12:30" onchange="updateWorkingDaysPreview()">
-      </div>
-      <div class="form-group full">
-        <div style="font-size:12px;color:var(--text3);padding:8px 10px;background:var(--surface2);border-radius:var(--radius)" id="hours-preview">Select working days to see hours summary</div>
+        <div style="font-size:12px;color:var(--text3);padding:8px 10px;background:var(--surface2);border-radius:var(--radius);margin-top:8px" id="hours-preview">Select working days to see hours summary</div>
       </div>
     </div>
     <div style="margin-top:16px;display:flex;align-items:center;gap:10px">
@@ -1351,27 +1356,36 @@ function selectColor(idx) {
   updatePreviewAvatar();
 }
 
+function toggleDayRow(day) {
+  const checked = document.getElementById(`day-${day}`)?.checked;
+  const times = document.getElementById(`day-times-${day}`);
+  if(times){ times.style.opacity = checked ? '1' : '0.35'; times.style.pointerEvents = checked ? '' : 'none'; }
+  updateWorkingDaysPreview();
+}
+
 function updateWorkingDaysPreview() {
   const allDays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  const days = allDays.filter(d=>document.getElementById(`day-${d}`)?.checked);
-  const start    = document.getElementById('new-start-time')?.value || '09:30';
-  const end      = document.getElementById('new-end-time')?.value   || '17:30';
-  const satStart = document.getElementById('new-sat-start')?.value  || '09:00';
-  const satEnd   = document.getElementById('new-sat-end')?.value    || '12:30';
+  let totalMins = 0;
+  const parts = [];
+  allDays.forEach(day => {
+    const cb = document.getElementById(`day-${day}`);
+    if(!cb?.checked) return;
+    const s = document.getElementById(`day-start-${day}`)?.value || '09:30';
+    const e = document.getElementById(`day-end-${day}`)?.value   || '17:30';
+    const [sh,sm]=s.split(':').map(Number), [eh,em]=e.split(':').map(Number);
+    const mins = (eh*60+em)-(sh*60+sm);
+    totalMins += mins;
+    const hrs = (mins/60).toFixed(1);
+    const hrsEl = document.getElementById(`day-hrs-${day}`);
+    if(hrsEl) hrsEl.textContent = `${hrs}h`;
+    parts.push(`${day} ${s}–${e}`);
+  });
   const el = document.getElementById('hours-preview');
-  if(!el) return;
-  if(!days.length) { el.textContent = 'No working days selected'; return; }
-  const wkDays = days.filter(d=>d!=='Sat');
-  const hasSat = days.includes('Sat');
-  const [sh,sm]=start.split(':').map(Number), [eh,em]=end.split(':').map(Number);
-  const wkHrs = ((eh*60+em)-(sh*60+sm))/60;
-  const [ssh,ssm]=satStart.split(':').map(Number), [seh,sem]=satEnd.split(':').map(Number);
-  const satHrs = ((seh*60+sem)-(ssh*60+ssm))/60;
-  const totalHrs = (wkHrs*wkDays.length + (hasSat?satHrs:0)).toFixed(1);
-  let summary = wkDays.length>0 ? `${wkDays.join(', ')}: ${start}–${end} (${wkHrs.toFixed(1)}h)` : '';
-  if(hasSat) summary += (summary?'  ·  ':'') + `Sat: ${satStart}–${satEnd} (${satHrs.toFixed(1)}h)`;
-  summary += `  ·  ${totalHrs}h/week`;
-  el.textContent = summary;
+  if(el){
+    if(!parts.length){ el.textContent = 'No working days selected'; return; }
+    const totalHrs = (totalMins/60).toFixed(1);
+    el.textContent = `${parts.join('  ·  ')}  ·  ${totalHrs}h/week`;
+  }
 }
 
 function autoInitials() {
@@ -1406,16 +1420,20 @@ function openEditStaff(id) {
   document.getElementById('new-role').value = s.role || 'employee';
   document.getElementById('new-pin').value = s.pin || '1234';
   document.getElementById('new-color-idx').value = selectedColorIdx;
-  // Working hours
-  const days = s.working_days || ['Mon','Tue','Wed','Thu','Fri'];
+  // Working hours — populate per-day schedule
+  const defHours = {Mon:{start:'09:30',end:'17:30'},Tue:{start:'09:30',end:'17:30'},Wed:{start:'09:30',end:'17:30'},Thu:{start:'09:30',end:'17:30'},Fri:{start:'09:30',end:'17:30'},Sat:{start:'09:00',end:'12:30'}};
+  const dh = s.day_hours || defHours;
   ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(day => {
     const cb = document.getElementById(`day-${day}`);
-    if(cb) cb.checked = days.includes(day);
+    const hasDayHours = dh[day];
+    if(cb) cb.checked = !!hasDayHours;
+    const startEl = document.getElementById(`day-start-${day}`);
+    const endEl   = document.getElementById(`day-end-${day}`);
+    if(startEl) startEl.value = hasDayHours?.start || (day==='Sat'?'09:00':'09:30');
+    if(endEl)   endEl.value   = hasDayHours?.end   || (day==='Sat'?'12:30':'17:30');
+    const times = document.getElementById(`day-times-${day}`);
+    if(times){ times.style.opacity=hasDayHours?'1':'0.35'; times.style.pointerEvents=hasDayHours?'':'none'; }
   });
-  document.getElementById('new-start-time').value = s.start_time || '09:30';
-  document.getElementById('new-end-time').value = s.end_time || '17:30';
-  const sst=document.getElementById('new-sat-start'); if(sst) sst.value=s.sat_start||'09:00';
-  const set=document.getElementById('new-sat-end'); if(set) set.value=s.sat_end||'12:30';
   updateWorkingDaysPreview();
   document.getElementById('staff-form-title').textContent = `Edit employee — ${s.name}`;
   document.getElementById('save-staff-btn').textContent = 'Save changes';
@@ -1439,13 +1457,14 @@ function cancelEditStaff() {
   document.getElementById('new-total').value = 25;
   document.getElementById('new-initials').value = '';
   document.getElementById('new-color-idx').value = 0;
-  // Reset working hours to Castle Estates defaults (Mon-Fri + Sat)
-  ['Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d=>{ const cb=document.getElementById(`day-${d}`); if(cb) cb.checked=true; });
-  ['Sun'].forEach(d=>{ const cb=document.getElementById(`day-${d}`); if(cb) cb.checked=false; });
-  const st=document.getElementById('new-start-time'); if(st) st.value='09:30';
-  const et=document.getElementById('new-end-time'); if(et) et.value='17:30';
-  const sst=document.getElementById('new-sat-start'); if(sst) sst.value='09:00';
-  const set=document.getElementById('new-sat-end'); if(set) set.value='12:30';
+  // Reset working schedule to Castle Estates defaults
+  const defH = {Mon:{start:'09:30',end:'17:30'},Tue:{start:'09:30',end:'17:30'},Wed:{start:'09:30',end:'17:30'},Thu:{start:'09:30',end:'17:30'},Fri:{start:'09:30',end:'17:30'},Sat:{start:'09:00',end:'12:30'}};
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(day=>{
+    const cb=document.getElementById(`day-${day}`); if(cb) cb.checked=!!defH[day];
+    const s=document.getElementById(`day-start-${day}`); if(s) s.value=defH[day]?.start||(day==='Sat'?'09:00':'09:30');
+    const e=document.getElementById(`day-end-${day}`);   if(e) e.value=defH[day]?.end  ||(day==='Sat'?'12:30':'17:30');
+    const times=document.getElementById(`day-times-${day}`); if(times){times.style.opacity=defH[day]?'1':'0.35';times.style.pointerEvents=defH[day]?'':'none';}
+  });
   updateWorkingDaysPreview();
   document.getElementById('staff-form-title').textContent = 'Add new employee';
   document.getElementById('save-staff-btn').textContent = 'Add employee';
@@ -1465,11 +1484,17 @@ async function saveStaff() {
   const c     = STAFF_COLORS[idx] || STAFF_COLORS[0];
   const role  = document.getElementById('new-role')?.value || 'employee';
   const pin   = document.getElementById('new-pin')?.value.trim() || '1234';
-  const working_days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].filter(d=>document.getElementById(`day-${d}`)?.checked);
-  const start_time = document.getElementById('new-start-time')?.value || '09:30';
-  const end_time   = document.getElementById('new-end-time')?.value   || '17:30';
-  const sat_start  = document.getElementById('new-sat-start')?.value  || '09:00';
-  const sat_end    = document.getElementById('new-sat-end')?.value    || '12:30';
+  const day_hours = {};
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(day=>{
+    const cb=document.getElementById(`day-${day}`);
+    if(cb?.checked){
+      day_hours[day]={
+        start: document.getElementById(`day-start-${day}`)?.value||'09:30',
+        end:   document.getElementById(`day-end-${day}`)?.value  ||'17:30'
+      };
+    }
+  });
+  const working_days = Object.keys(day_hours);
 
   if(!name)          { toast('Please enter a full name.','error'); return; }
   if(!dept)          { toast('Please enter a department.','error'); return; }
@@ -1478,13 +1503,13 @@ async function saveStaff() {
   if(!working_days.length) { toast('Please select at least one working day.','error'); return; }
 
   if(editId) {
-    const {error:ue}=await sb.from('staff').update({name,dept,email,total,initials:ini,color:c.color,bg:c.bg,role,pin,working_days,start_time,end_time,sat_start,sat_end}).eq('id',parseInt(editId));
+    const {error:ue}=await sb.from('staff').update({name,dept,email,total,initials:ini,color:c.color,bg:c.bg,role,pin,day_hours}).eq('id',parseInt(editId));
     if(ue){toast('Error: '+ue.message,'error');return;}
     const existing=getS(parseInt(editId));
-    if(existing) Object.assign(existing,{name,dept,email,total,initials:ini,color:c.color,bg:c.bg,role,pin,working_days,start_time,end_time,sat_start,sat_end});
+    if(existing) Object.assign(existing,{name,dept,email,total,initials:ini,color:c.color,bg:c.bg,role,pin,day_hours,working_days});
     initUserSelect(); applyRoleUI(); toast(`${name} updated.`);
   } else {
-    const {data:nd,error:ne}=await sb.from('staff').insert({name,dept,email,total,initials:ini,color:c.color,bg:c.bg,role,pin,working_days,start_time,end_time,sat_start,sat_end}).select().single();
+    const {data:nd,error:ne}=await sb.from('staff').insert({name,dept,email,total,initials:ini,color:c.color,bg:c.bg,role,pin,day_hours}).select().single();
     if(ne){toast('Error: '+ne.message,'error');return;}
     STAFF.push(rowToStaff(nd)); initUserSelect(); toast(`${name} added to the team.`);
   }
