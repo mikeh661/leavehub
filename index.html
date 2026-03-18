@@ -379,7 +379,7 @@ textarea.form-control{resize:vertical;min-height:72px}
       </button>
     </nav>
     <div class="sidebar-footer">
-      Castle Estates · Staff Leave<br>v2.5
+      Castle Estates · Staff Leave<br>v2.6
     </div>
   </aside>
 
@@ -435,11 +435,26 @@ function rowToStaff(r){
   const working_days = Object.keys(day_hours);
   return {id:r.id,name:r.name,initials:r.initials||'',dept:r.dept||'',total:r.total||25,color:r.color||'#185FA5',bg:r.bg||'#E6F1FB',email:r.email,role:r.role||'employee',pin:r.pin||'1234',day_hours,working_days};
 }
-function rowToReq(r){ return {id:r.id,staffId:r.staff_id,start:r.start_date,end:r.end_date,days:r.days,type:r.type,reason:r.reason||'',status:r.status,submitted:r.submitted}; }
+function rowToReq(r){ return {id:r.id,staffId:r.staff_id,start:r.start_date,end:r.end_date,days:r.days,type:r.type,reason:r.reason||'',status:r.status,submitted:r.submitted,admin_note:r.admin_note||''}; }
 function rowToBO(r){ return {id:r.id,start:r.start_date,end:r.end_date,label:r.label}; }
 
 let STAFF=[], requests=[], blackouts=[];
 let emailCfg = {adminEmail:'',notifyOnSubmit:true,notifyOnDecision:true,enabled:false,ejsPublicKey:'',ejsPrivateKey:'',ejsServiceId:'',ejsSubmitTemplateId:'',ejsDecisionTemplateId:''};
+
+const DEFAULT_LEAVE_TYPES = [
+  {name:'Annual leave',    color:'#185FA5', bg:'#E6F1FB', countsAgainst:true},
+  {name:'Sick leave',      color:'#854F0B', bg:'#FAEEDA', countsAgainst:false},
+  {name:'Unpaid leave',    color:'#5F5E5A', bg:'#EDEDEA', countsAgainst:false},
+  {name:'Compassionate',   color:'#993556', bg:'#FBEAF0', countsAgainst:false},
+  {name:'Maternity/Paternity', color:'#533AB7', bg:'#EEEDFE', countsAgainst:false},
+  {name:'TOIL',            color:'#3B6D11', bg:'#EAF3DE', countsAgainst:true},
+];
+
+let leaveTypes = [...DEFAULT_LEAVE_TYPES];
+
+async function saveLeaveTypes() {
+  await sb.from('app_config').upsert({key:'leaveTypes', value:JSON.stringify(leaveTypes)});
+}
 
 async function loadAllData() {
   const [s,r,b,c] = await Promise.all([
@@ -451,7 +466,11 @@ async function loadAllData() {
   STAFF=(s.data||[]).map(rowToStaff);
   requests=(r.data||[]).map(rowToReq);
   blackouts=(b.data||[]).map(rowToBO);
-  if(c.data){ c.data.forEach(row=>{ try{ const v=JSON.parse(row.value); if(typeof v==='object') Object.assign(emailCfg,v); }catch(e){} }); }
+  if(c.data){ c.data.forEach(row=>{ try{
+    const v=JSON.parse(row.value);
+    if(row.key==='emailCfg' && typeof v==='object') Object.assign(emailCfg,v);
+    if(row.key==='leaveTypes' && Array.isArray(v)) leaveTypes=v;
+  }catch(e){} }); }
 }
 
 async function saveEmailCfg(){ await sb.from('app_config').upsert({key:'emailCfg',value:JSON.stringify(emailCfg)}); }
@@ -606,6 +625,7 @@ async function sendDecisionEmail(req, decision) {
     start_date: fmtFull(req.start),
     end_date:   fmtFull(req.end),
     days:       req.days,
+    reason:     req.admin_note || '',
   };
   const entry = {
     time: new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}),
@@ -809,7 +829,9 @@ function renderBook() {
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">Leave type</label>
-          <select class="form-control" id="leave-type"><option>Annual leave</option><option>Sick leave</option><option>Unpaid leave</option><option>Other</option></select>
+          <select class="form-control" id="leave-type">
+            ${leaveTypes.map(lt=>`<option value="${lt.name}">${lt.name}${!lt.countsAgainst?' (does not use allowance)':''}</option>`).join('')}
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">Duration</label>
@@ -943,6 +965,7 @@ function renderMyRequests() {
           </div>
           <div class="row-sub">${fmtFull(r.start)}${r.start!==r.end?' – '+fmtFull(r.end):''} · ${r.days} day${r.days!==1?'s':''} ${r.reason?' · '+r.reason:''}</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">Submitted ${fmtFull(r.submitted)}</div>
+          ${r.status==='rejected'&&r.admin_note?`<div style="font-size:12px;color:var(--red-text);background:var(--red-bg);padding:5px 8px;border-radius:var(--radius);margin-top:5px">Manager's note: ${r.admin_note}</div>`:''}
           ${r.status==='cancellation_requested'?`<div style="font-size:11px;color:#6B21A8;margin-top:2px">Cancellation requested — awaiting admin approval</div>`:''}
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0">
@@ -1134,8 +1157,17 @@ function renderAdmin() {
           </div>
           <div style="display:flex;gap:8px;flex-shrink:0">
             <button class="btn sm approve" onclick="approveReq(${r.id})">Approve</button>
-            <button class="btn sm reject" onclick="rejectReq(${r.id})">Reject</button>
+            <button class="btn sm reject" onclick="showRejectBox(${r.id})" id="reject-btn-${r.id}">Reject</button>
           </div>
+        </div>
+        <div id="reject-box-${r.id}" style="display:none;margin-top:10px;padding:12px;background:var(--red-bg);border-radius:var(--radius);border:1px solid var(--red-mid)">
+          <label style="font-size:12px;font-weight:500;color:var(--red-text);display:block;margin-bottom:6px">Reason for rejection <span style="font-weight:400;opacity:0.7">(sent to ${s.name.split(' ')[0]})</span></label>
+          <textarea id="reject-note-${r.id}" placeholder="e.g. Insufficient cover during that period..." style="width:100%;padding:8px;border:1px solid var(--red-mid);border-radius:var(--radius);font-size:13px;font-family:inherit;resize:vertical;min-height:60px;background:white;color:var(--text);outline:none"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;justify-content:flex-end">
+            <button class="btn sm" onclick="hideRejectBox(${r.id})">Cancel</button>
+            <button class="btn sm reject" onclick="rejectReq(${r.id})">Confirm rejection</button>
+          </div>
+        </div>
         </div>`;}).join('')}
       </div>
       <div class="card">
@@ -1160,6 +1192,16 @@ function renderAdmin() {
 
 function swAdminTab(tab){adminSubTab=tab;renderAdmin();}
 
+function showRejectBox(id) {
+  document.getElementById(`reject-box-${id}`).style.display='block';
+  document.getElementById(`reject-btn-${id}`).style.display='none';
+  document.getElementById(`reject-note-${id}`)?.focus();
+}
+function hideRejectBox(id) {
+  document.getElementById(`reject-box-${id}`).style.display='none';
+  document.getElementById(`reject-btn-${id}`).style.display='';
+}
+
 async function approveReq(id){
   const {error}=await sb.from('requests').update({status:'approved'}).eq('id',id);
   if(error){toast('Error: '+error.message,'error');return;}
@@ -1172,9 +1214,10 @@ async function approveReq(id){
   renderAdmin();
 }
 async function rejectReq(id){
-  const {error}=await sb.from('requests').update({status:'rejected'}).eq('id',id);
+  const note = document.getElementById(`reject-note-${id}`)?.value.trim()||'';
+  const {error}=await sb.from('requests').update({status:'rejected',admin_note:note}).eq('id',id);
   if(error){toast('Error: '+error.message,'error');return;}
-  const req=requests.find(r=>r.id===id); req.status='rejected'; updateBadges();
+  const req=requests.find(r=>r.id===id); req.status='rejected'; req.admin_note=note; updateBadges();
   if(ejsReady()&&emailCfg.notifyOnDecision){
     toast('Rejected — sending notification…','sending',0);
     const ok=await sendDecisionEmail(req,'rejected');
@@ -1625,6 +1668,57 @@ async function removeBO(id){
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
+// ─── Leave types ─────────────────────────────────────────────────────────────
+
+function addLeaveType() {
+  document.getElementById('lt-edit-idx').value = '';
+  document.getElementById('lt-name').value = '';
+  document.getElementById('lt-color').value = '#185FA5';
+  document.getElementById('lt-counts').checked = true;
+  document.getElementById('lt-form').style.display = 'block';
+  document.getElementById('lt-name').focus();
+}
+
+function editLeaveType(i) {
+  const lt = leaveTypes[i];
+  document.getElementById('lt-edit-idx').value = i;
+  document.getElementById('lt-name').value = lt.name;
+  document.getElementById('lt-color').value = lt.color;
+  document.getElementById('lt-counts').checked = lt.countsAgainst;
+  document.getElementById('lt-form').style.display = 'block';
+  document.getElementById('lt-name').focus();
+}
+
+function cancelLeaveType() {
+  document.getElementById('lt-form').style.display = 'none';
+}
+
+async function saveLeaveType() {
+  const name = document.getElementById('lt-name').value.trim();
+  if(!name){ toast('Please enter a type name.','error'); return; }
+  const color = document.getElementById('lt-color').value;
+  const countsAgainst = document.getElementById('lt-counts').checked;
+  // Derive a light bg from the colour
+  const bg = color+'22'; // 13% opacity hex approximation
+  const idx = document.getElementById('lt-edit-idx').value;
+  if(idx!=='') {
+    leaveTypes[parseInt(idx)] = {name, color, bg, countsAgainst};
+  } else {
+    leaveTypes.push({name, color, bg, countsAgainst});
+  }
+  await saveLeaveTypes();
+  toast(`Leave type "${name}" saved.`);
+  renderSettings();
+}
+
+async function deleteLeaveType(i) {
+  if(!confirm(`Delete "${leaveTypes[i].name}"? Existing requests using this type are not affected.`)) return;
+  leaveTypes.splice(i,1);
+  await saveLeaveTypes();
+  toast('Leave type deleted.','info');
+  renderSettings();
+}
+
 function renderSettings(){
   const isConfigured = ejsReady();
   const statusDot = isConfigured
@@ -1649,7 +1743,50 @@ function renderSettings(){
   </div>
   <div class="page-content">
 
-    <!-- Step-by-step setup guide -->
+    <!-- Leave types -->
+    <div class="card" style="max-width:640px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:0">Leave types</div>
+        <button class="btn sm primary" onclick="addLeaveType()">+ Add type</button>
+      </div>
+      ${leaveTypes.map((lt,i)=>`
+      <div class="row" style="gap:10px" id="lt-row-${i}">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+          <div style="width:14px;height:14px;border-radius:50%;background:${lt.color};flex-shrink:0"></div>
+          <div>
+            <div style="font-size:13px;font-weight:500">${lt.name}</div>
+            <div style="font-size:11px;color:var(--text3)">${lt.countsAgainst?'Counts against allowance':'Does not use allowance'}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn sm" onclick="editLeaveType(${i})">Edit</button>
+          ${leaveTypes.length>1?`<button class="btn sm danger" onclick="deleteLeaveType(${i})">Delete</button>`:''}
+        </div>
+      </div>`).join('')}
+      <div id="lt-form" style="display:none;margin-top:14px;padding:14px;background:var(--surface2);border-radius:var(--radius)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Type name</label>
+            <input class="form-control" type="text" id="lt-name" placeholder="e.g. Compassionate leave">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Colour</label>
+            <input class="form-control" type="color" id="lt-color" value="#185FA5" style="height:38px;padding:2px 6px;cursor:pointer">
+          </div>
+          <div class="form-group full">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:400">
+              <input type="checkbox" id="lt-counts" style="width:auto;accent-color:var(--navy)" checked>
+              Counts against annual leave allowance
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn primary" onclick="saveLeaveType()">Save</button>
+          <button class="btn" onclick="cancelLeaveType()">Cancel</button>
+        </div>
+        <input type="hidden" id="lt-edit-idx" value="">
+      </div>
+    </div>
     <div class="card" style="max-width:640px">
       <div class="card-title">EmailJS setup guide</div>
       <p style="font-size:13px;color:var(--text2);margin-bottom:16px">EmailJS lets this app send real emails from your Gmail or Outlook account, for free (up to 200/month). Follow these steps once:</p>
