@@ -1167,7 +1167,6 @@ function chgMo(dir){calMonth+=dir;if(calMonth<0){calMonth=11;calYear--;}if(calMo
 function renderAdmin() {
   const pending=requests.filter(r=>r.status==='pending').sort((a,b)=>a.submitted.localeCompare(b.submitted));
   const cancellations=requests.filter(r=>r.status==='cancellation_requested').sort((a,b)=>a.submitted.localeCompare(b.submitted));
-  const recent=requests.filter(r=>!['pending','cancellation_requested'].includes(r.status)).sort((a,b)=>b.submitted.localeCompare(a.submitted)).slice(0,8);
   const totalPending=pending.length+cancellations.length;
 
   // Auto-jump calendar to the month of the earliest pending request
@@ -1235,10 +1234,6 @@ function renderAdmin() {
         </div>`;}).join('')}
       </div>
       <div class="card">
-        <div class="card-title">Recent decisions</div>
-        ${recent.length===0?`<p style="font-size:13px;color:var(--text3)">No decisions yet</p>`:recent.map(r=>{const s=getS(r.staffId);return`<div class="row"><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="width:34px;height:34px;font-size:12px;background:${s.bg};color:${s.color};flex-shrink:0">${s.initials}</div><div><div class="row-name">${s.name}</div><div class="row-sub">${fmtFull(r.start)}${r.start!==r.end?' – '+fmtFull(r.end):''} · ${r.days}d · ${r.type}</div></div></div><span class="badge ${r.status}">${capStatus(r.status)}</span></div>`;}).join('')}
-      </div>
-      <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
           <div>
             <div class="card-title" style="margin-bottom:2px">Team diary — ${MONTHS[adminCalMonth]} ${adminCalYear}</div>
@@ -1252,7 +1247,7 @@ function renderAdmin() {
         </div>
         ${buildAdminCal(adminCalYear, adminCalMonth, pending)}
         ${pending.length>0?`<div style="margin-top:12px;padding:10px;background:var(--amber-bg);border-radius:var(--radius);font-size:12px;color:var(--amber-text)">
-          <strong>Pending requests highlighted in amber:</strong> ${pending.map(r=>`${getS(r.staffId)?.name} (${fmtS(r.start)}${r.start!==r.end?' – '+fmtS(r.end):''})`).join(', ')}
+          <strong>Pending requests:</strong> ${pending.map(r=>`${getS(r.staffId)?.name} (${fmtS(r.start)}${r.start!==r.end?' – '+fmtS(r.end):''})`).join(', ')}
         </div>`:''}
       </div>
     </div>
