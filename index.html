@@ -515,6 +515,8 @@ let boCalMonth = new Date().getMonth();
 let boCalYear  = new Date().getFullYear();
 let boSelStart = null, boSelEnd = null, boHover = null;
 let adminSubTab = 'approvals';
+let adminCalMonth = new Date().getMonth();
+let adminCalYear  = new Date().getFullYear();
 let currentTab = 'dashboard';
 let loggedInUserId = null; // set on login
 let notifLog = [];
@@ -787,9 +789,6 @@ function renderDashboard() {
         </div>
       </div>
       ${buildTeamCal(dashCalYear, dashCalMonth)}
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
-        ${STAFF.map(st=>`<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)"><div style="width:10px;height:10px;border-radius:50%;background:${st.color}"></div>${st.name.split(' ')[0]}</div>`).join('')}
-      </div>
     </div>
     <div class="card">
       <div class="card-title">Leave balance</div>
@@ -830,21 +829,30 @@ function buildTeamCal(y, m) {
       cur.setDate(cur.getDate()+1);
     }
   });
-  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">`;
-  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d=>{html+=`<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text3);padding:4px 0">${d}</div>`;});
-  for(let i=0;i<dow;i++)html+=`<div></div>`;
+  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">`;
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d=>{
+    html+=`<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text3);padding:4px 0">${d}</div>`;
+  });
+  for(let i=0;i<dow;i++) html+=`<div></div>`;
   for(let d=1;d<=last.getDate();d++){
     const dS=`${mStr}-${String(d).padStart(2,'0')}`;
     const dw=(dow+d-1)%7,isWE=dw>=5;
     const isTd=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d;
     const bh=getBH(dS),bo=getBO(dS);
     const offStaff=offMap[dS]||[];
-    let bg=isWE?'var(--surface)':(bh?'var(--blue-bg)':(bo?'var(--red-bg)':'var(--surface2)')); 
-    html+=`<div style="background:${bg};border:2px solid ${isTd?'var(--navy)':'transparent'};border-radius:6px;padding:3px 4px;min-height:48px"><div style="font-size:11px;font-weight:${isTd?'700':'500'};color:${isTd?'var(--navy)':'var(--text2)'}${isWE?';opacity:0.5':''}">${d}</div><div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:2px">${offStaff.map(st=>`<div title="${st.name}" style="width:12px;height:12px;border-radius:50%;background:${st.color}"></div>`).join('')}</div></div>`;
+    let bg=isWE?'var(--surface)':(bh?'var(--blue-bg)':(bo?'var(--red-bg)':'var(--surface2)'));
+    html+=`<div style="background:${bg};border:2px solid ${isTd?'var(--navy)':'transparent'};border-radius:6px;padding:3px 4px;min-height:60px">
+      <div style="font-size:11px;font-weight:${isTd?'700':'500'};color:${isTd?'var(--navy)':'var(--text2)'}${isWE?';opacity:0.5':''};margin-bottom:3px">${d}</div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        ${offStaff.map(st=>`<div title="${st.name}" style="display:flex;align-items:center;gap:3px;background:${st.color};border-radius:4px;padding:2px 5px;overflow:hidden"><span style="font-size:9px;font-weight:600;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${st.name}</span></div>`).join('')}
+      </div>
+    </div>`;
   }
   html+=`</div>`;
   return html;
 }
+
+
 
 
 function hour(){const h=new Date().getHours();return h<12?'morning':h<17?'afternoon':'evening';}
@@ -1162,6 +1170,13 @@ function renderAdmin() {
   const recent=requests.filter(r=>!['pending','cancellation_requested'].includes(r.status)).sort((a,b)=>b.submitted.localeCompare(a.submitted)).slice(0,8);
   const totalPending=pending.length+cancellations.length;
 
+  // Auto-jump calendar to the month of the earliest pending request
+  if(pending.length > 0) {
+    const earliest = pending[0].start;
+    adminCalMonth = parseInt(earliest.split('-')[1]) - 1;
+    adminCalYear  = parseInt(earliest.split('-')[0]);
+  }
+
   document.getElementById('tab-admin').innerHTML = `
   <div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Manage leave requests and restricted periods</div></div></div>
   <div class="page-content">
@@ -1223,6 +1238,23 @@ function renderAdmin() {
         <div class="card-title">Recent decisions</div>
         ${recent.length===0?`<p style="font-size:13px;color:var(--text3)">No decisions yet</p>`:recent.map(r=>{const s=getS(r.staffId);return`<div class="row"><div style="display:flex;align-items:center;gap:10px"><div class="avatar" style="width:34px;height:34px;font-size:12px;background:${s.bg};color:${s.color};flex-shrink:0">${s.initials}</div><div><div class="row-name">${s.name}</div><div class="row-sub">${fmtFull(r.start)}${r.start!==r.end?' – '+fmtFull(r.end):''} · ${r.days}d · ${r.type}</div></div></div><span class="badge ${r.status}">${capStatus(r.status)}</span></div>`;}).join('')}
       </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div>
+            <div class="card-title" style="margin-bottom:2px">Team diary — ${MONTHS[adminCalMonth]} ${adminCalYear}</div>
+            <div style="font-size:12px;color:var(--text3)">Check for conflicts before approving requests</div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn sm" onclick="adminCalChg(-1)">← Prev</button>
+            <button class="btn sm" onclick="adminCalChg(0)">Today</button>
+            <button class="btn sm" onclick="adminCalChg(1)">Next →</button>
+          </div>
+        </div>
+        ${buildAdminCal(adminCalYear, adminCalMonth, pending)}
+        ${pending.length>0?`<div style="margin-top:12px;padding:10px;background:var(--amber-bg);border-radius:var(--radius);font-size:12px;color:var(--amber-text)">
+          <strong>Pending requests highlighted in amber:</strong> ${pending.map(r=>`${getS(r.staffId)?.name} (${fmtS(r.start)}${r.start!==r.end?' – '+fmtS(r.end):''})`).join(', ')}
+        </div>`:''}
+      </div>
     </div>
     <div id="admin-blackout" style="display:${adminSubTab==='blackout'?'block':'none'}">
       ${renderBlackoutPanel()}
@@ -1240,6 +1272,75 @@ function renderAdmin() {
 }
 
 function swAdminTab(tab){adminSubTab=tab;renderAdmin();}
+
+function adminCalChg(dir) {
+  if(dir===0){adminCalMonth=new Date().getMonth();adminCalYear=new Date().getFullYear();}
+  else{adminCalMonth+=dir;if(adminCalMonth<0){adminCalMonth=11;adminCalYear--;}if(adminCalMonth>11){adminCalMonth=0;adminCalYear++;}}
+  // Re-render just the diary without resetting the month
+  const el=document.getElementById('admin-approvals');
+  if(el) renderAdmin();
+}
+
+function buildAdminCal(y, m, pendingReqs) {
+  const first=new Date(y,m,1),last=new Date(y,m+1,0);
+  let dow=first.getDay();dow=(dow+6)%7;
+  const today=new Date();today.setHours(0,0,0,0);
+  const mStr=`${y}-${String(m+1).padStart(2,'0')}`;
+
+  // Build approved map
+  const approvedMap={};
+  requests.filter(r=>r.status==='approved').forEach(r=>{
+    const st=getS(r.staffId);if(!st)return;
+    let cur=new Date(r.start+'T12:00:00'),end2=new Date(r.end+'T12:00:00');
+    while(cur<=end2){
+      const dStr=cur.toISOString().split('T')[0];
+      if(dStr.startsWith(mStr)){if(!approvedMap[dStr])approvedMap[dStr]=[];approvedMap[dStr].push({st,type:'approved'});}
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+
+  // Build pending map
+  const pendingMap={};
+  pendingReqs.forEach(r=>{
+    const st=getS(r.staffId);if(!st)return;
+    let cur=new Date(r.start+'T12:00:00'),end2=new Date(r.end+'T12:00:00');
+    while(cur<=end2){
+      const dStr=cur.toISOString().split('T')[0];
+      if(dStr.startsWith(mStr)){if(!pendingMap[dStr])pendingMap[dStr]=[];pendingMap[dStr].push({st,type:'pending'});}
+      cur.setDate(cur.getDate()+1);
+    }
+  });
+
+  let html=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">`;
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d=>{
+    html+=`<div style="text-align:center;font-size:10px;font-weight:600;color:var(--text3);padding:4px 0">${d}</div>`;
+  });
+  for(let i=0;i<dow;i++) html+=`<div></div>`;
+  for(let d=1;d<=last.getDate();d++){
+    const dS=`${mStr}-${String(d).padStart(2,'0')}`;
+    const dw=(dow+d-1)%7,isWE=dw>=5;
+    const isTd=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d;
+    const bh=getBH(dS),bo=getBO(dS);
+    const approvedStaff=approvedMap[dS]||[];
+    const pendingStaff=pendingMap[dS]||[];
+    const hasPending=pendingStaff.length>0;
+    let bg=isWE?'var(--surface)':(bh?'var(--blue-bg)':(bo?'var(--red-bg)':'var(--surface2)'));
+    let border=isTd?'var(--navy)':(hasPending?'var(--amber)':'transparent');
+    html+=`<div style="background:${bg};border:2px solid ${border};border-radius:6px;padding:3px 4px;min-height:64px">
+      <div style="font-size:11px;font-weight:${isTd?'700':'500'};color:${isTd?'var(--navy)':'var(--text2)'}${isWE?';opacity:0.5':''};margin-bottom:2px">${d}${bh?'<span style="float:right;font-size:8px;color:var(--blue-text)">BH</span>':''}</div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        ${approvedStaff.map(({st})=>`<div title="${st.name} — approved" style="display:flex;align-items:center;background:${st.color};border-radius:3px;padding:1px 4px;overflow:hidden"><span style="font-size:9px;font-weight:600;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${st.name}</span></div>`).join('')}
+        ${pendingStaff.map(({st})=>`<div title="${st.name} — pending approval" style="display:flex;align-items:center;background:var(--amber-bg);border:1px dashed var(--amber);border-radius:3px;padding:1px 4px;overflow:hidden"><span style="font-size:9px;font-weight:600;color:var(--amber-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${st.name} ⏳</span></div>`).join('')}
+      </div>
+    </div>`;
+  }
+  html+=`</div>
+  <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--text3)">
+    <div style="display:flex;align-items:center;gap:5px"><div style="width:16px;height:10px;border-radius:3px;background:var(--navy)"></div> Approved leave</div>
+    <div style="display:flex;align-items:center;gap:5px"><div style="width:16px;height:10px;border-radius:3px;background:var(--amber-bg);border:1px dashed var(--amber)"></div> Pending approval ⏳</div>
+  </div>`;
+  return html;
+}
 
 function showRejectBox(id) {
   document.getElementById(`reject-box-${id}`).style.display='block';
