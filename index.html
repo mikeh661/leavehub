@@ -109,6 +109,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sy
 .badge.rejected{background:var(--red-bg);color:var(--red-text)}
 .badge.cancellation_requested{background:#F3E8FF;color:#6B21A8}
 .badge.cancelled{background:var(--surface2);color:var(--text3)}
+.badge.logged{background:#FFF3CD;color:#856404;border:1px solid #FFDA6A}
 .badge.pending{background:var(--amber-bg);color:var(--amber-text)}
 .badge.rejected{background:var(--red-bg);color:var(--red-text)}
 .badge.bh{background:var(--blue-bg);color:var(--blue-text)}
@@ -384,7 +385,7 @@ textarea.form-control{resize:vertical;min-height:72px}
       </button>
     </nav>
     <div class="sidebar-footer">
-      Castle Estates · Staff Leave<br>v2.7
+      Castle Estates · Staff Leave<br>v2.8
     </div>
   </aside>
 
@@ -710,10 +711,11 @@ function applyRoleUI() {
 function updateBadges() {
   const myPending = requests.filter(r=>r.staffId===currentUserId&&r.status==='pending').length;
   const allPending = requests.filter(r=>r.status==='pending'||r.status==='cancellation_requested').length;
+  const loggedCount = requests.filter(r=>r.status==='logged').length;
   const mb = document.getElementById('badge-myrequests');
   const ab = document.getElementById('badge-admin');
   if(mb){ mb.style.display = myPending>0?'':'none'; mb.textContent = myPending; }
-  if(ab){ ab.style.display = allPending>0?'':'none'; ab.textContent = allPending; }
+  if(ab){ ab.style.display = (allPending+loggedCount)>0?'':'none'; ab.textContent = allPending+loggedCount; }
 }
 
 // ─── Tab routing ──────────────────────────────────────────────────────────────
@@ -1035,7 +1037,7 @@ function renderMyRequests() {
 }
 
 function capStatus(s){
-  const map={'pending':'Pending','approved':'Approved','rejected':'Rejected','cancellation_requested':'Cancellation requested','cancelled':'Cancelled'};
+  const map={'pending':'Pending','approved':'Approved','rejected':'Rejected','cancellation_requested':'Cancellation requested','cancelled':'Cancelled','logged':'Logged'};
   return map[s]||cap(s);
 }
 
@@ -1177,11 +1179,14 @@ function renderAdmin() {
     adminCalYear  = parseInt(earliest.split('-')[0]);
   }
 
+  const logged=requests.filter(r=>r.status==='logged').sort((a,b)=>b.submitted.localeCompare(a.submitted));
+
   document.getElementById('tab-admin').innerHTML = `
   <div class="page-header"><div><div class="page-title">Admin</div><div class="page-sub">Manage leave requests and restricted periods</div></div></div>
   <div class="page-content">
     <div class="sub-tabs">
       <button class="sub-tab ${adminSubTab==='approvals'?'active':''}" onclick="swAdminTab('approvals')">Leave approvals ${totalPending>0?`<span style="margin-left:4px;background:var(--amber-bg);color:var(--amber-text);font-size:10px;font-weight:600;padding:0 6px;border-radius:20px">${totalPending}</span>`:''}</button>
+      <button class="sub-tab ${adminSubTab==='logged'?'active':''}" onclick="swAdminTab('logged')">Logged absences ${logged.length>0?`<span style="margin-left:4px;background:#FFF3CD;color:#856404;font-size:10px;font-weight:600;padding:0 6px;border-radius:20px">${logged.length}</span>`:''}</button>
       <button class="sub-tab ${adminSubTab==='blackout'?'active':''}" onclick="swAdminTab('blackout')">Blackout dates</button>
       <button class="sub-tab ${adminSubTab==='team'?'active':''}" onclick="swAdminTab('team')">Team overview</button>
       <button class="sub-tab ${adminSubTab==='staff'?'active':''}" onclick="swAdminTab('staff')">Staff profiles</button>
@@ -1263,6 +1268,65 @@ function renderAdmin() {
         </div>`:''}
       </div>
     </div>
+    <div id="admin-logged" style="display:${adminSubTab==='logged'?'block':'none'}">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div>
+            <div class="card-title" style="margin-bottom:2px">Logged absences</div>
+            <div style="font-size:12px;color:var(--text3)">Days recorded informally — needs a follow-up conversation</div>
+          </div>
+          <button class="btn sm primary" onclick="showLogAbsenceForm()">+ Log absence</button>
+        </div>
+        <div id="log-absence-form" style="display:none;padding:16px;background:var(--surface2);border-radius:var(--radius);margin-bottom:16px;border:1px solid var(--border2)">
+          <div style="font-size:13px;font-weight:600;margin-bottom:12px">Log an informal absence</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Staff member</label>
+              <select class="form-control" id="log-staff-id">
+                ${STAFF.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date</label>
+              <input class="form-control" type="date" id="log-date" value="${new Date().toISOString().split('T')[0]}">
+            </div>
+            <div class="form-group full">
+              <label class="form-label">Notes <span style="font-weight:400;color:var(--text3)">(reason given, what was agreed, action needed…)</span></label>
+              <textarea class="form-control" id="log-notes" placeholder="e.g. Called in sick — needs to confirm leave type. Discuss on return." style="min-height:70px;resize:vertical"></textarea>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px;justify-content:flex-end">
+            <button class="btn" onclick="hideLogAbsenceForm()">Cancel</button>
+            <button class="btn primary" onclick="saveLoggedAbsence()">Save absence</button>
+          </div>
+        </div>
+        ${logged.length===0
+          ? `<p style="font-size:13px;color:var(--text3);text-align:center;padding:24px">No logged absences — use this when a staff member calls in and you need to record the day before deciding the leave type.</p>`
+          : logged.map(r=>{
+              const s=getS(r.staffId);
+              return`<div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div class="avatar" style="width:38px;height:38px;font-size:13px;background:${s.bg};color:${s.color};flex-shrink:0">${s.initials}</div>
+                  <div style="flex:1">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+                      <span class="row-name">${s.name}</span>
+                      <span class="badge logged">Needs follow-up</span>
+                    </div>
+                    <div class="row-sub">${fmtFull(r.start)} · Logged ${fmtFull(r.submitted)}</div>
+                    ${r.reason?`<div style="font-size:12px;color:var(--text2);margin-top:4px;padding:6px 8px;background:var(--surface2);border-radius:var(--radius);border-left:3px solid var(--amber)">${r.reason}</div>`:''}
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;padding-left:50px">
+                  <select id="resolve-type-${r.id}" class="form-control" style="flex:1;min-width:160px;max-width:220px">
+                    ${leaveTypes.map(lt=>`<option value="${lt.name}">${lt.name}</option>`).join('')}
+                  </select>
+                  <button class="btn sm approve" onclick="resolveLoggedAbsence(${r.id})">Convert to leave</button>
+                  <button class="btn sm" style="color:var(--text3)" onclick="dismissLoggedAbsence(${r.id})">Dismiss</button>
+                </div>
+              </div>`;
+            }).join('')}
+      </div>
+    </div>
     <div id="admin-blackout" style="display:${adminSubTab==='blackout'?'block':'none'}">
       ${renderBlackoutPanel()}
     </div>
@@ -1285,6 +1349,56 @@ function toggleRecentDecisions() {
   const isHidden = body.style.display === 'none';
   body.style.display = isHidden ? 'block' : 'none';
   icon.textContent = isHidden ? 'Hide ▲' : 'Show ▼';
+}
+
+function showLogAbsenceForm(){ document.getElementById('log-absence-form').style.display='block'; }
+function hideLogAbsenceForm(){ document.getElementById('log-absence-form').style.display='none'; }
+
+async function saveLoggedAbsence(){
+  const staffId = parseInt(document.getElementById('log-staff-id').value);
+  const date    = document.getElementById('log-date').value;
+  const notes   = document.getElementById('log-notes').value.trim();
+  if(!date){ toast('Please select a date.','error'); return; }
+  const {data,error} = await sb.from('requests').insert({
+    staff_id:staffId, start_date:date, end_date:date,
+    days:1, type:'Logged absence', reason:notes,
+    status:'logged', submitted:new Date().toISOString().split('T')[0]
+  }).select().single();
+  if(error){ toast('Error: '+error.message,'error'); return; }
+  requests.push(rowToReq(data));
+  updateBadges();
+  toast('Absence logged — follow-up reminder saved.');
+  adminSubTab='logged';
+  renderAdmin();
+}
+
+async function resolveLoggedAbsence(id){
+  const leaveType = document.getElementById(`resolve-type-${id}`)?.value;
+  const lt = leaveTypes.find(t=>t.name===leaveType);
+  const req = requests.find(r=>r.id===id);
+  if(!req) return;
+  // Convert to a pending request so it goes through normal approval
+  const {error} = await sb.from('requests').update({
+    type: leaveType, status:'approved',
+    days: lt?.countsAgainst ? req.days : req.days
+  }).eq('id',id);
+  if(error){ toast('Error: '+error.message,'error'); return; }
+  req.type = leaveType; req.status = 'approved';
+  updateBadges();
+  toast(`Converted to "${leaveType}" and approved.`);
+  adminSubTab='logged';
+  renderAdmin();
+}
+
+async function dismissLoggedAbsence(id){
+  if(!confirm('Dismiss this logged absence? It will be removed without converting to leave.')) return;
+  const {error} = await sb.from('requests').delete().eq('id',id);
+  if(error){ toast('Error: '+error.message,'error'); return; }
+  requests = requests.filter(r=>r.id!==id);
+  updateBadges();
+  toast('Logged absence dismissed.','info');
+  adminSubTab='logged';
+  renderAdmin();
 }
 
 function swAdminTab(tab){adminSubTab=tab;renderAdmin();}
