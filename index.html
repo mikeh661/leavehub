@@ -508,7 +508,13 @@ const UK_BH = {
 
 let currentUserId = 0;
 
-// ─── Calendar state ───────────────────────────────────────────────────────────
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+
+// Use local date (not UTC) to avoid BST off-by-one issues
+function localDateStr(d) {
+  d = d || new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 let calMonth = new Date().getMonth();
 let calYear  = new Date().getFullYear();
@@ -751,7 +757,7 @@ function renderDashboard() {
   const s = getS(currentUserId);
   const used = usedD(currentUserId), rem = remD(currentUserId);
   const today = new Date(); today.setHours(0,0,0,0);
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = localDateStr(today);
   const myPend = requests.filter(r=>r.staffId===currentUserId&&r.status==='pending').length;
   const upcoming = requests.filter(r=>r.staffId===currentUserId&&r.status==='approved'&&new Date(r.start+'T12:00:00')>=today).sort((a,b)=>a.start.localeCompare(b.start)).slice(0,4);
   const upBH = Object.entries(UK_BH).filter(([d])=>new Date(d+'T12:00:00')>=today).sort((a,b)=>a[0].localeCompare(b[0])).slice(0,4);
@@ -888,11 +894,11 @@ function renderBook() {
         </div>
         <div class="form-group">
           <label class="form-label">Start date</label>
-          <input class="form-control" type="date" id="start-date" min="${new Date().toISOString().split('T')[0]}">
+          <input class="form-control" type="date" id="start-date" min="${localDateStr()}">
         </div>
         <div class="form-group" id="end-date-group">
           <label class="form-label">End date</label>
-          <input class="form-control" type="date" id="end-date" min="${new Date().toISOString().split('T')[0]}">
+          <input class="form-control" type="date" id="end-date" min="${localDateStr()}">
         </div>
         <div class="form-group" id="half-day-group" style="display:none">
           <label class="form-label">Which half?</label>
@@ -992,7 +998,7 @@ async function submitRequest(){
   const {data,error}=await sb.from('requests').insert({
     staff_id:currentUserId,start_date:start,end_date:end,
     days,type:displayType,reason,status:'pending',
-    submitted:new Date().toISOString().split('T')[0]
+    submitted:localDateStr()
   }).select().single();
   if(error){toast('Error: '+error.message,'error');if(btn){btn.disabled=false;btn.textContent='Submit request';}return;}
   const req=rowToReq(data); requests.push(req); updateBadges();
@@ -1288,7 +1294,7 @@ function renderAdmin() {
             </div>
             <div class="form-group">
               <label class="form-label">Date</label>
-              <input class="form-control" type="date" id="log-date" value="${new Date().toISOString().split('T')[0]}">
+              <input class="form-control" type="date" id="log-date" value="${localDateStr()}">
             </div>
             <div class="form-group full">
               <label class="form-label">Notes <span style="font-weight:400;color:var(--text3)">(reason given, what was agreed, action needed…)</span></label>
@@ -1362,7 +1368,7 @@ async function saveLoggedAbsence(){
   const {data,error} = await sb.from('requests').insert({
     staff_id:staffId, start_date:date, end_date:date,
     days:1, type:'Logged absence', reason:notes,
-    status:'logged', submitted:new Date().toISOString().split('T')[0]
+    status:'logged', submitted:localDateStr()
   }).select().single();
   if(error){ toast('Error: '+error.message,'error'); return; }
   requests.push(rowToReq(data));
@@ -2273,8 +2279,8 @@ async function testEmail(){
       staff_name: 'Test User',
       staff_dept: 'Test Department',
       leave_type: 'Annual leave',
-      start_date: fmtFull(new Date().toISOString().split('T')[0]),
-      end_date:   fmtFull(new Date().toISOString().split('T')[0]),
+      start_date: fmtFull(localDateStr()),
+      end_date:   fmtFull(localDateStr()),
       days:       1,
       reason:     'This is a test email from LeaveHub — everything is working!',
     });
@@ -2594,8 +2600,8 @@ async function checkAndSendReminders() {
   if(!ejsReady()) return; // no email configured
   const today = new Date(); today.setHours(0,0,0,0);
   const in7 = new Date(today); in7.setDate(today.getDate()+7);
-  const in7Str = in7.toISOString().split('T')[0];
-  const todayStr = today.toISOString().split('T')[0];
+  const in7Str = localDateStr(in7);
+  const todayStr = localDateStr(today);
 
   // Check if we already sent reminders today (stored in Supabase app_config)
   try {
